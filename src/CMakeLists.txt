@@ -33,6 +33,9 @@ macro(add_bdd_benchmark NAME)
   if (LIBBDD)
     __add_benchmark(libbdd lib-bdd ${NAME} bdd)
   endif (LIBBDD)
+  if (BEX)
+    __add_benchmark(bex    bex     ${NAME} bdd)
+  endif (BEX)
   if (OXIDD)
     __add_benchmark(oxidd  oxidd   ${NAME} bdd)
   endif (OXIDD)
@@ -87,6 +90,9 @@ macro(link_bdd_extra NAME EXTRA_LIB)
   if (OXIDD)
     target_link_libraries(oxidd_${NAME}_bdd   PRIVATE ${EXTRA_LIB})
   endif (OXIDD)
+  if (BEX)
+    target_link_libraries(bex_${NAME}_bdd     PRIVATE ${EXTRA_LIB})
+  endif (BEX)
 endmacro(link_bdd_extra)
 
 macro(link_bcdd_extra NAME EXTRA_LIB)
@@ -153,3 +159,13 @@ add_bdd_benchmark(relprod)
 add_bcdd_benchmark(relprod)
 
 add_benchmark(cnf)
+
+# ---------------------------------------------------------------------------- #
+# Target to build all BEX benchmarks
+if (BEX)
+  add_custom_target(bex_all
+    DEPENDS
+      bex_game-of-life_bdd bex_hamiltonian_bdd bex_queens_bdd bex_tic-tac-toe_bdd
+      bex_mcnet_bdd bex_picotrav_bdd bex_qbf_bdd bex_apply_bdd bex_relprod_bdd bex_cnf_bdd
+  )
+endif (BEX)

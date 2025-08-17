@@ -25,3 +25,6 @@
 [submodule "external/pugixml"]
 	path = external/pugixml
 	url = ../../zeux/pugixml
+[submodule "external/bex"]
+	path = external/bex
+	url = ../../tangentstorm/bex

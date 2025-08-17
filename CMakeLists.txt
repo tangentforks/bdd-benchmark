@@ -99,6 +99,12 @@ if (OXIDD)
   add_subdirectory(external/oxidd oxidd EXCLUDE_FROM_ALL)
 endif (OXIDD)
 
+# Bex Package (Michal Wallace - tangentstorm)
+option(BEX "Build for Bex" ON)
+if (BEX)
+  add_subdirectory(external/bex/ffi bex EXCLUDE_FROM_ALL)
+endif (BEX)
+
 # Sylvan Package (Tom van Dijk - University of Twente, Netherlands)
 option(SYLVAN "Build for Sylvan (Saarland & Eindhoven Univesity, Germany & Netherlands)" ON)
 if (SYLVAN)
