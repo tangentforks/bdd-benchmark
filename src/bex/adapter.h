@@ -31,18 +31,18 @@ public:
 
 private:
   const int _varcount;
-  bex_mgr_t* _mgr;
+  bex_bdd_t* _mgr;
   bex_nid_t _latest_build;
 
   // Init and Deinit
 public:
   bex_bdd_adapter(int varcount)
     : _varcount(varcount)
-    , _mgr(bex_mgr_new())
+    , _mgr(bex_bdd_new())
   {}
 
   ~bex_bdd_adapter() {
-    bex_mgr_free(_mgr);
+    bex_bdd_free(_mgr);
   }
 
   template <typename F>
@@ -59,20 +59,20 @@ public:
   inline bex_nid_t
   top()
   {
-    return bex_top(_mgr);
+    return bex_top();
   }
 
   inline bex_nid_t
   bot()
   {
-    return bex_bot(_mgr);
+    return bex_bot();
   }
 
   inline bex_nid_t
   ithvar(uint32_t label)
   {
     bex_vid_t vid = { label };
-    return bex_ithvar(_mgr, vid);
+    return bex_ithvar(vid);
   }
 
   inline bex_nid_t
@@ -87,7 +87,7 @@ public:
   cube(IT rbegin, IT rend)
   {
     bex_nid_t res = top();
-    while (rbegin != rend) { res = bex_and(_mgr, res, ithvar(*(rbegin++))); }
+    while (rbegin != rend) { res = bex_bdd_and(_mgr, res, ithvar(*(rbegin++))); }
     return res;
   }
 
@@ -96,7 +96,7 @@ public:
   {
     bex_nid_t res = top();
     for (int i = _varcount - 1; 0 <= i; --i) {
-      if (pred(i)) { res = bex_and(_mgr, res, ithvar(i)); }
+      if (pred(i)) { res = bex_bdd_and(_mgr, res, ithvar(i)); }
     }
     return res;
   }
@@ -104,26 +104,25 @@ public:
   inline bex_nid_t
   apply_and(const bex_nid_t& f, const bex_nid_t& g)
   {
-    return bex_and(_mgr, f, g);
+    return bex_bdd_and(_mgr, f, g);
   }
 
   inline bex_nid_t
   apply_or(const bex_nid_t& f, const bex_nid_t& g)
   {
-    return bex_or(_mgr, f, g);
+    return bex_bdd_or(_mgr, f, g);
   }
 
   inline bex_nid_t
   apply_xor(const bex_nid_t& f, const bex_nid_t& g)
   {
-    return bex_xor(_mgr, f, g);
+    return bex_bdd_xor(_mgr, f, g);
   }
 
   inline bex_nid_t
   apply_not(const bex_nid_t& f)
   {
-    // NOT can be implemented as XOR with top()
-    return bex_xor(_mgr, f, top());
+    return bex_not(f);
   }
 
   inline bex_nid_t
@@ -150,19 +149,19 @@ public:
   inline uint64_t
   nodecount(const bex_nid_t& f)
   {
-    return bex_node_count(_mgr, f);
+    return bex_bdd_node_count(_mgr, f);
   }
 
   inline uint64_t
   satcount(const bex_nid_t& f)
   {
-    return bex_solution_count(_mgr, f);
+    return bex_bdd_solution_count(_mgr, f);
   }
 
   inline uint64_t
   satcount(const bex_nid_t& f, const size_t vc)
   {
-    return bex_solution_count(_mgr, f);
+    return bex_bdd_solution_count(_mgr, f);
   }
 
   inline size_t
@@ -209,7 +208,7 @@ public:
              const bex_nid_t& low,
              const bex_nid_t& high)
   {
-    return _latest_build = apply_ite(ithvar(label), high, low);
+    return _latest_build = bex_bdd_ite(_mgr, ithvar(label), high, low);
   }
 
   inline bex_nid_t
@@ -221,7 +220,7 @@ public:
   inline bex_nid_t
   apply_ite(const bex_nid_t& i, const bex_nid_t& t, const bex_nid_t& e)
   {
-    return bex_ite(_mgr, i, t, e);
+    return bex_bdd_ite(_mgr, i, t, e);
   }
 
   template<typename F>
