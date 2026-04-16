@@ -1,6 +1,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <string>
 #include <string_view>
@@ -10,6 +11,20 @@
 #include "../common/adapter.h"
 
 #include <bex.h>
+
+// BEX_MODE selects how bex is invoked from the bdd-benchmark adapter:
+//   "bdd"  - call bex_bdd_* directly (bottom-up construction). DEFAULT.
+//   "sub"  - build an AST via bex_ast_*, then bex_subsolve to BDD.
+//   "swap" - build an AST via bex_ast_*, then bex_swapsolve to BDD.
+enum class bex_mode { BDD, SUB, SWAP };
+inline bex_mode get_bex_mode() {
+  const char* m = std::getenv("BEX_MODE");
+  if (!m) return bex_mode::BDD;
+  std::string s(m);
+  if (s == "sub")  return bex_mode::SUB;
+  if (s == "swap") return bex_mode::SWAP;
+  return bex_mode::BDD;
+}
 
 class bex_bdd_adapter;
 
@@ -36,6 +51,7 @@ private:
   bex_bdd_t* _bdd;
   bex_swap_t* _swap;
   bex_nid_t _latest_build;
+  bex_mode _mode;
   mutable std::unordered_map<uint64_t, bex_nid_t> _ast_to_bdd_cache;
 
   // Init and Deinit
@@ -45,7 +61,12 @@ public:
     , _ast(bex_ast_new())
     , _bdd(bex_bdd_new())
     , _swap(bex_swap_new())
-  {}
+    , _mode(get_bex_mode())
+  {
+    // Direct single-threaded ITE recursion is much faster than swarm
+    // dispatch for bottom-up bdd-benchmark workloads.
+    bex_bdd_set_direct_ite(_bdd, true);
+  }
 
   ~bex_bdd_adapter() {
     bex_ast_free(_ast);
@@ -112,19 +133,22 @@ public:
   inline bex_nid_t
   apply_and(const bex_nid_t& f, const bex_nid_t& g)
   {
-    return bex_ast_and(_ast, f, g);
+    return (_mode == bex_mode::BDD) ? bex_bdd_and(_bdd, f, g)
+                                    : bex_ast_and(_ast, f, g);
   }
 
   inline bex_nid_t
   apply_or(const bex_nid_t& f, const bex_nid_t& g)
   {
-    return bex_ast_or(_ast, f, g);
+    return (_mode == bex_mode::BDD) ? bex_bdd_or(_bdd, f, g)
+                                    : bex_ast_or(_ast, f, g);
   }
 
   inline bex_nid_t
   apply_xor(const bex_nid_t& f, const bex_nid_t& g)
   {
-    return bex_ast_xor(_ast, f, g);
+    return (_mode == bex_mode::BDD) ? bex_bdd_xor(_bdd, f, g)
+                                    : bex_ast_xor(_ast, f, g);
   }
 
   inline bex_nid_t
@@ -154,40 +178,48 @@ public:
     return apply_not(apply_xor(f, g));
   }
 
+  // In AST modes, convert the AST nid to a BDD nid using the configured
+  // solver (subsolve or swapsolve). SWAP mode produces a nid in the swap
+  // solver's own storage, so we copy the result into _bdd afterward.
+  // Results are cached so repeated nodecount/satcount calls don't re-solve.
+  inline bex_nid_t _as_bdd(const bex_nid_t& f) {
+    if (_mode == bex_mode::BDD) return f;
+    if (bex_is_lit(f)) return f;
+    auto it = _ast_to_bdd_cache.find(f.nid);
+    if (it != _ast_to_bdd_cache.end()) return it->second;
+    bex_nid_t bdd_nid;
+    if (_mode == bex_mode::SWAP) {
+      bex_nid_t swap_nid = bex_swapsolve(_ast, _swap, f);
+      bdd_nid = bex_swap_copy_to_bdd(_swap, _bdd, swap_nid);
+    } else {
+      bdd_nid = bex_subsolve(_ast, _bdd, f);
+    }
+    _ast_to_bdd_cache[f.nid] = bdd_nid;
+    return bdd_nid;
+  }
+
   inline uint64_t
   nodecount(const bex_nid_t& f)
   {
-    // Handle constants directly without conversion
     if (f.nid == bex_top().nid) return 1;
     if (f.nid == bex_bot().nid) return 1;
-
-    bex_nid_t bdd_nid = get_or_convert_to_bdd(f);
-    // If conversion failed, return 1
-    if (bdd_nid.nid == bex_bot().nid && f.nid != bex_bot().nid) return 1;
-
-    return bex_bdd_node_count(_bdd, bdd_nid);
+    return bex_bdd_node_count(_bdd, _as_bdd(f));
   }
 
   inline uint64_t
   satcount(const bex_nid_t& f)
   {
-    // Handle constants directly without conversion
     if (f.nid == bex_top().nid) return 1;
     if (f.nid == bex_bot().nid) return 0;
-
-    bex_nid_t bdd_nid = get_or_convert_to_bdd(f);
-    return bex_bdd_solution_count(_bdd, bdd_nid);
+    return bex_bdd_solution_count(_bdd, _as_bdd(f));
   }
 
   inline uint64_t
   satcount(const bex_nid_t& f, const size_t vc)
   {
-    // Handle constants directly without conversion
     if (f.nid == bex_top().nid) return (1ULL << vc);
     if (f.nid == bex_bot().nid) return 0;
-
-    bex_nid_t bdd_nid = get_or_convert_to_bdd(f);
-    return bex_bdd_solution_count(_bdd, bdd_nid);
+    return bex_bdd_solution_count(_bdd, _as_bdd(f));
   }
 
   inline size_t
@@ -234,7 +266,9 @@ public:
              const bex_nid_t& low,
              const bex_nid_t& high)
   {
-    return _latest_build = bex_ast_ite(_ast, ithvar(label), high, low);
+    return _latest_build = (_mode == bex_mode::BDD)
+      ? bex_bdd_ite(_bdd, ithvar(label), high, low)
+      : bex_ast_ite(_ast, ithvar(label), high, low);
   }
 
   inline bex_nid_t
@@ -246,7 +280,8 @@ public:
   inline bex_nid_t
   apply_ite(const bex_nid_t& i, const bex_nid_t& t, const bex_nid_t& e)
   {
-    return bex_ast_ite(_ast, i, t, e);
+    return (_mode == bex_mode::BDD) ? bex_bdd_ite(_bdd, i, t, e)
+                                    : bex_ast_ite(_ast, i, t, e);
   }
 
   // Conversion methods
