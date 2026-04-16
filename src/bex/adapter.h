@@ -5,7 +5,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-#include <unordered_map>
 
 #include "../common/adapter.h"
 
@@ -45,7 +44,12 @@ public:
     , _ast(bex_ast_new())
     , _bdd(bex_bdd_new())
     , _swap(bex_swap_new())
-  {}
+  {
+    // The bdd-benchmark workloads build BDDs bottom-up with many small,
+    // sequential operations. Direct single-threaded ITE recursion is much
+    // faster here than swarm dispatch.
+    bex_bdd_set_direct_ite(_bdd, true);
+  }
 
   ~bex_bdd_adapter() {
     bex_ast_free(_ast);
@@ -112,19 +116,19 @@ public:
   inline bex_nid_t
   apply_and(const bex_nid_t& f, const bex_nid_t& g)
   {
-    return bex_ast_and(_ast, f, g);
+    return bex_bdd_and(_bdd, f, g);
   }
 
   inline bex_nid_t
   apply_or(const bex_nid_t& f, const bex_nid_t& g)
   {
-    return bex_ast_or(_ast, f, g);
+    return bex_bdd_or(_bdd, f, g);
   }
 
   inline bex_nid_t
   apply_xor(const bex_nid_t& f, const bex_nid_t& g)
   {
-    return bex_ast_xor(_ast, f, g);
+    return bex_bdd_xor(_bdd, f, g);
   }
 
   inline bex_nid_t
@@ -157,12 +161,10 @@ public:
   inline uint64_t
   nodecount(const bex_nid_t& f)
   {
-    // Handle constants directly without conversion
     if (f.nid == bex_top().nid) return 1;
     if (f.nid == bex_bot().nid) return 1;
 
-    bex_nid_t bdd_nid = get_or_convert_to_bdd(f);
-    // If conversion failed, return 1
+    bex_nid_t bdd_nid = f;
     if (bdd_nid.nid == bex_bot().nid && f.nid != bex_bot().nid) return 1;
 
     return bex_bdd_node_count(_bdd, bdd_nid);
@@ -171,23 +173,19 @@ public:
   inline uint64_t
   satcount(const bex_nid_t& f)
   {
-    // Handle constants directly without conversion
     if (f.nid == bex_top().nid) return 1;
     if (f.nid == bex_bot().nid) return 0;
 
-    bex_nid_t bdd_nid = get_or_convert_to_bdd(f);
-    return bex_bdd_solution_count(_bdd, bdd_nid);
+    return bex_bdd_solution_count(_bdd, f);
   }
 
   inline uint64_t
   satcount(const bex_nid_t& f, const size_t vc)
   {
-    // Handle constants directly without conversion
     if (f.nid == bex_top().nid) return (1ULL << vc);
     if (f.nid == bex_bot().nid) return 0;
 
-    bex_nid_t bdd_nid = get_or_convert_to_bdd(f);
-    return bex_bdd_solution_count(_bdd, bdd_nid);
+    return bex_bdd_solution_count(_bdd, f);
   }
 
   inline size_t
@@ -234,7 +232,7 @@ public:
              const bex_nid_t& low,
              const bex_nid_t& high)
   {
-    return _latest_build = bex_ast_ite(_ast, ithvar(label), high, low);
+    return _latest_build = bex_bdd_ite(_bdd, ithvar(label), high, low);
   }
 
   inline bex_nid_t
@@ -246,7 +244,7 @@ public:
   inline bex_nid_t
   apply_ite(const bex_nid_t& i, const bex_nid_t& t, const bex_nid_t& e)
   {
-    return bex_ast_ite(_ast, i, t, e);
+    return bex_bdd_ite(_bdd, i, t, e);
   }
 
   // Conversion methods
